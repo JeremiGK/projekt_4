@@ -68,7 +68,7 @@ int main() {
     auto res4 = invoke_forall([](auto a){ return a; }, T1);
     // It writes out "res4 = 1 2.5 abc\n".
     std::cout << "res4 = "
-              << get<0>(res4) << " " << get<1>(res4) << " " << get<2>(res4)
+              << std::get<0>(res4) << " " << std::get<1>(res4) << " " << std::get<2>(res4)
               << '\n';
 
     // It writes out "sum1 = 6\n".
@@ -103,3 +103,13 @@ int main() {
     static_assert(std::get<0>(t) == std::string("hello"));
     static_assert(std::get<1>(t) == 10);
 }
+
+// #include "invoke_forall.h"
+// struct TypeT {
+//
+// };
+// using Tuple = std::tuple<int, int, int>;
+// int main() {
+//     static_assert(detail::Gettable<Tuple>);
+//     static_assert(!detail::Tuple_like<TypeT>);
+// }
