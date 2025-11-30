@@ -2,46 +2,75 @@
 #define INVOKE_FORALL_H
 #include<bits/stdc++.h>
 namespace detail {
-    // Koncept na typ krotkowy, tak jak zdefiniowano w treści zadania.
+    using std::remove_cvref_t;
+    using std::size_t;
+    using std::tuple_size;
+    using std::tuple_size_v;
+    using std::derived_from;
+    using std::integral_constant;
+    using std::get;
+    using std::index_sequence;
+    using std::make_index_sequence;
+    using std::forward;
+    // Struct do chowania Tupli.
     template<typename T>
-    concept Tuple_like =
-        requires { typename std::tuple_size<T>; }
-    && std::derived_from<std::tuple_size<T>,
-        std::integral_constant<std::size_t, std::tuple_size_v<T>>>;
+    struct Protect {
+        T&& value;  // przechowuje referencję/r-wartość
+        constexpr explicit Protect(T&& v) : value(std::forward<T>(v)) {}
+    };
 
+
+    // Koncept na typ krotkowy, tak jak zdefiniowano w treści zadania.
+    template <typename T>
+concept Tuple_like =
+    requires {
+        typename std::tuple_size<std::remove_cvref_t<T>>;
+        tuple_size<std::remove_cvref_t<T>>::value;
+    }
+    &&
+    // tu już wymuszamy pełną definicję i ::value
+    std::derived_from<
+        std::tuple_size<std::remove_cvref_t<T>>,
+        std::integral_constant<
+            std::size_t,
+            std::tuple_size<std::remove_cvref_t<T>>::value
+        >
+    >;
     // Koncept na typ wyciągalny.
-    template<typename T, std::size_t I>
+    template<typename T, size_t I>
     constexpr bool is_gettable_index() {
-        return requires(T t) { std::get<I>(t); };
+        return requires {
+            std::get<I>(std::declval<T>());
+        };
     }
 
     template<typename T, std::size_t... I>
-    constexpr bool gettable_impl(std::index_sequence<I...>) {
-        return (true && ... && is_gettable_index<T, I>());
+    constexpr bool gettable_impl(index_sequence<I...>) {
+        return (true && ... && is_gettable_index<remove_cvref_t<T>, I>() );
     }
 
     template<typename T>
     concept Gettable =
-        Tuple_like<std::remove_cvref_t<T>> &&
-        gettable_impl<T>(
-            std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>{}
+        Tuple_like<remove_cvref_t<T>> &&
+        gettable_impl<remove_cvref_t<T>>(
+            make_index_sequence<tuple_size_v<remove_cvref_t<T>>>{}
         );
 
 
-    // Zwraca 0 gdy argument nie jest wyciągalny.
+    // Zwraca 0 gdy typ nie jest wyciągalny.
     // W przeciwnym wypadku zwraca jego tuple_size + 1 > 0.
     template<typename T>
-    constexpr size_t helper_get_size(T&& argument) {
-        if constexpr (Gettable<T>) {
-            return std::tuple_size<T>::value+1;
+    constexpr size_t helper_get_size_type() {
+        if constexpr (Gettable<remove_cvref_t<T>>) {
+            return tuple_size_v<remove_cvref_t<T>> + 1;
         }
         return 0;
     }
 
     // Sprawdza czy argument ma arność wanted_size lub nie jest wyciągalny.
     template<typename T>
-    constexpr bool helper_check_validity(T&& argument, size_t wanted_size) {
-        size_t s = helper_get_size(argument);
+    constexpr bool helper_check_validity(size_t wanted_size) {
+        size_t s = helper_get_size_type<remove_cvref_t<T>>();
         return (s == wanted_size+1)||(s == 0);
     }
 
@@ -50,65 +79,82 @@ namespace detail {
 
     // Funkcja jest przeciążona dla typów wyciągalnych i niewyciągalnych,
     // aby zwracany przez funkcję typ dał się wydedukować.
-}
-template<typename T>
-    struct Protect {
-    T&& value;  // przechowuje referencję/r-wartość
-    constexpr explicit Protect(T&& v) : value(std::forward<T>(v)) {}
-};
-template<typename T>
-constexpr auto protect_arg(T&& v) {
-    return Protect<T>(std::forward<T>(v));
-}
-
-namespace detail {
-    template<size_t i, typename T>
+    template<size_t I, typename T>
     constexpr decltype(auto) helper_get_value(T&& argument)
-        requires(detail::Gettable<T>) {
-        return std::get<i>(std::forward<T>(argument));
+        requires(Gettable<remove_cvref_t<T>>) {
+        return std::get<I>(forward<T>(argument));
         }
 
-    template<size_t i, typename T>
+    template<size_t I, typename T>
     constexpr decltype(auto) helper_get_value(T&& argument)
-        requires(!detail::Gettable<T>) {
-        return std::forward<T>(argument);
+        requires(!Gettable<remove_cvref_t<T>>) {
+        return forward<T>(argument);
         }
-    template<size_t i, typename T>
+    template<size_t I, typename T>
     constexpr decltype(auto) helper_get_value(Protect<T>&& arg)
     {
-        return std::forward<T>(arg.value);
+        return forward<T>(arg.value);
     }
 
     template<std::size_t I, typename... Args>
     constexpr auto invoke_for_index(Args&&... args) {
-        return std::invoke(helper_get_value<I>(std::forward<Args>(args))...);
+        return std::invoke(
+            helper_get_value<I>(forward<Args>(args))...);
     }
 
     template<typename... Args, std::size_t... I>
-    constexpr auto helper_caller(std::index_sequence<I...>, Args&&... args) {
-        return std::make_tuple(invoke_for_index<I>(std::forward<Args>(args)...)...);
+    constexpr auto helper_caller(index_sequence<I...>, Args&&... args) {
+        return std::make_tuple(invoke_for_index<I>(forward<Args>(args)...)...);
     }
+    template<typename tuple_t>
+    constexpr auto get_array_from_tuple(tuple_t&& tuple)
+    {
+        constexpr auto get_array = [](auto&& ... x){ return std::array{std::forward<decltype(x)>(x) ... }; };
+        return std::apply(get_array, std::forward<tuple_t>(tuple));
+    }
+
+    template <typename First, typename... T>
+    struct all_same_type {
+        constexpr static bool value = std::is_same_v< std::tuple<First,T...>,
+                                                      std::tuple<T...,First>>;
+    };
+
+    template <typename... T>
+    struct all_same_type<std::tuple<T...>> : all_same_type<T...> {};
+
+    template <typename... T>
+    constexpr bool all_same_type_v = all_same_type<T...>::value;
+
+
+}
+template<typename T>
+constexpr auto protect_arg(T&& v) {
+    return detail::Protect<T>(std::forward<T>(v));
 }
 
 template<typename... Args>
 constexpr auto invoke_forall(Args&&... args) {
     // Or na arnościach wszystkich elementów. Jeśli są takie same to daje dobrą
     // wartość, w.p.p. kolejne linijki to wyłapią.
-    constexpr size_t m = (detail::helper_get_size(std::forward<Args>(args))|...);
-    if(m == 0) {
-        // Żaden z argumentów nie jest wyciągalny.
-        return std::invoke(std::forward<Args>(args)...);
-    }
+    constexpr std::size_t m = (0 |...| detail::helper_get_size_type<Args>() );
 
     // Sprawdzamy czy wszystkie wyciągalne argumenty mają tą samą arność.
-    constexpr bool all_valid = (detail::helper_check_validity(std::forward<Args>(args), m)&...);
+    constexpr bool all_valid = (detail::helper_check_validity<Args>(m)&...);
     if constexpr (!all_valid)
         throw std::runtime_error("Nie wszystkie tuple mają tę samą arność");
     // Wywołujemy dla wszystkich
-    for(size_t i = 0; i < m; i++) {
-
+    if constexpr (m == 0) {
+        // Żaden z argumentów nie jest wyciągalny. Rozpakowujemy też protected.
+        return std::invoke(detail::helper_get_value<m>(std::forward<Args>(args))...);
+    } else {
+        constexpr std::size_t n = m - 1;
+        auto tuple = detail::helper_caller(std::make_index_sequence<n>{},std::forward<Args>(args)...);
+        if(detail::all_same_type_v<decltype(tuple)>) {
+            return detail::get_array_from_tuple(tuple);
+        } else {
+            return tuple;
+        }
     }
-    return detail::helper_caller(std::make_index_sequence<m>{},std::forward<Args>(args)...);
 }
 
 
